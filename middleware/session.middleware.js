@@ -80,7 +80,8 @@ export const createSessionMiddleware = () => {
     saveUninitialized: true, // Changed to true to ensure session is created and cookie is set
     store: MongoStore.create({
       mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/vitalgeonaturals',
-      ttl: 14 * 24 * 60 * 60 // 14 days
+      ttl: 14 * 24 * 60 * 60, // 14 days
+      touchAfter: 24 * 3600 // Lazy session update (1 day)
     }),
     cookie: {
       secure: isProduction, // HTTPS only in production
@@ -88,7 +89,10 @@ export const createSessionMiddleware = () => {
       maxAge: 1000 * 60 * 60 * 24 * 14, // 14 days
       sameSite: isProduction ? 'none' : 'lax', // Allow cross-site in production
       // Don't set domain - let browser handle it for cross-domain cookies
-    }
+      path: '/' // Ensure cookie is set for all paths
+    },
+    // Ensure session is saved even if not modified
+    rolling: true // Reset expiration on activity
   });
 
   // Admin session config (separate cookie)
@@ -99,7 +103,8 @@ export const createSessionMiddleware = () => {
     saveUninitialized: true, // Changed to true to ensure session is created and cookie is set
     store: MongoStore.create({
       mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/vitalgeonaturals',
-      ttl: 14 * 24 * 60 * 60 // 14 days
+      ttl: 14 * 24 * 60 * 60, // 14 days
+      touchAfter: 24 * 3600 // Lazy session update (1 day)
     }),
     cookie: {
       secure: isProduction, // HTTPS only in production
@@ -107,7 +112,10 @@ export const createSessionMiddleware = () => {
       maxAge: 1000 * 60 * 60 * 24 * 14, // 14 days
       sameSite: isProduction ? 'none' : 'lax', // Allow cross-site in production
       // Don't set domain - let browser handle it for cross-domain cookies
-    }
+      path: '/' // Ensure cookie is set for all paths
+    },
+    // Ensure session is saved even if not modified
+    rolling: true // Reset expiration on activity
   });
 
   // Return middleware that chooses the right session based on request
@@ -116,13 +124,32 @@ export const createSessionMiddleware = () => {
     const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER || process.env.PORT;
     
     // Debug logging
-    console.log('[Session Middleware] Path:', req.path, 'Origin:', req.get('origin'), 'IsAdmin:', isAdmin, 'IsProduction:', isProduction, 'Cookie:', req.headers.cookie?.substring(0, 80) || 'none');
+    const cookieHeader = req.headers.cookie || 'none';
+    console.log('[Session Middleware] Path:', req.path, 'Origin:', req.get('origin'), 'IsAdmin:', isAdmin, 'IsProduction:', isProduction, 'Cookie:', cookieHeader.substring(0, 80));
     
-    if (isAdmin) {
-      return adminSession(req, res, next);
-    } else {
-      return defaultSession(req, res, next);
-    }
+    // Store cookie name in request for debugging
+    req._sessionCookieName = isAdmin ? 'admin.connect.sid' : 'connect.sid';
+    
+    const sessionMiddleware = isAdmin ? adminSession : defaultSession;
+    
+    return sessionMiddleware(req, res, (err) => {
+      if (err) {
+        console.error('[Session Middleware] Error:', err);
+        return next(err);
+      }
+      
+      // After session middleware, ensure cookie is being set
+      if (req.session && !req.sessionID) {
+        console.warn('[Session Middleware] Session exists but no sessionID!');
+      }
+      
+      // Log if cookie will be set
+      if (req.session && req.session.cookie) {
+        console.log('[Session Middleware] Session created - ID:', req.sessionID, 'Cookie name:', req._sessionCookieName);
+      }
+      
+      next();
+    });
   };
 };
 

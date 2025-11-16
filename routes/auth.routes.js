@@ -137,6 +137,11 @@ router.get('/users', isAuthenticated, isAdmin, authController.getAllUsers);
 router.get('/checksession', (req, res) => {
   console.log('[CheckSession] Route hit - Path:', req.path, 'Method:', req.method);
   
+  // Get cookie name from session store if available
+  const cookieName = req.sessionStore?.cookieName || 
+                     req.session?.cookie?.name || 
+                     (req.path && req.path.includes('/admin') ? 'admin.connect.sid' : 'connect.sid');
+  
   const sessionInfo = {
     sessionId: req.sessionID,
     sessionExists: !!req.session,
@@ -146,7 +151,7 @@ router.get('/checksession', (req, res) => {
       email: req.user.email,
       role: req.user.role
     } : null,
-    cookieName: req.session?.cookie?.name || 'not set',
+    cookieName: cookieName,
     cookieOptions: req.session?.cookie ? {
       secure: req.session.cookie.secure,
       httpOnly: req.session.cookie.httpOnly,
@@ -181,15 +186,47 @@ router.get('/checksession', (req, res) => {
         originalMaxAge: req.session.cookie.originalMaxAge,
         httpOnly: req.session.cookie.httpOnly,
         secure: req.session.cookie.secure,
-        sameSite: req.session.cookie.sameSite
+        sameSite: req.session.cookie.sameSite,
+        path: req.session.cookie.path
       } : null
     };
   }
 
-  return res.json({
-    success: true,
-    message: 'Session check completed',
-    session: sessionInfo
+  // Ensure session is saved and cookie is set before sending response
+  req.session.save((err) => {
+    if (err) {
+      console.error('[CheckSession] Error saving session:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Error saving session',
+        error: err.message
+      });
+    }
+    
+    // Log Set-Cookie header being sent
+    const setCookieHeader = res.getHeader('Set-Cookie');
+    if (setCookieHeader) {
+      const cookieValue = Array.isArray(setCookieHeader) ? setCookieHeader[0] : setCookieHeader;
+      console.log('[CheckSession] Set-Cookie header:', cookieValue?.substring(0, 150));
+      sessionInfo.setCookieHeader = cookieValue;
+    } else {
+      console.warn('[CheckSession] ⚠️ No Set-Cookie header found! Cookie may not be set.');
+      sessionInfo.setCookieHeader = 'Not Set - This is the problem!';
+    }
+    
+    // Log response headers for debugging
+    const responseHeaders = {
+      'Set-Cookie': setCookieHeader ? (Array.isArray(setCookieHeader) ? setCookieHeader.length : 1) : 0,
+      'Access-Control-Allow-Credentials': res.getHeader('Access-Control-Allow-Credentials'),
+      'Access-Control-Allow-Origin': res.getHeader('Access-Control-Allow-Origin')
+    };
+    sessionInfo.responseHeaders = responseHeaders;
+    
+    return res.json({
+      success: true,
+      message: 'Session check completed',
+      session: sessionInfo
+    });
   });
 });
 
