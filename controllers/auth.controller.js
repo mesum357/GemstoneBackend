@@ -67,11 +67,15 @@ const authController = {
       const user = req.user;
 
       if (!user) {
+        console.error('[Login] No user in req.user');
         return res.status(401).json({
           success: false,
           message: 'Authentication failed'
         });
       }
+
+      // Debug logging
+      console.log('[Login] User authenticated:', user.email, 'Session ID:', req.sessionID, 'Cookie name:', req.session?.cookie?.name);
 
       // Reject admin users from regular login endpoint
       if (user.role === 'admin') {
@@ -82,13 +86,23 @@ const authController = {
         });
       }
 
+      // Ensure session is saved
+      req.session.save((err) => {
+        if (err) {
+          console.error('[Login] Session save error:', err);
+        } else {
+          console.log('[Login] Session saved successfully');
+        }
+      });
+
       // Remove password from response
       const userResponse = user.toJSON();
 
       return res.json({
         success: true,
         message: 'Login successful',
-        user: userResponse
+        user: userResponse,
+        sessionId: req.sessionID
       });
     } catch (error) {
       console.error('Login error:', error);
@@ -215,6 +229,9 @@ const authController = {
 
   // Get authentication status (for regular users only, excludes admin users)
   getAuthStatus: (req, res) => {
+    // Debug logging
+    console.log('[Auth Status] Session ID:', req.sessionID, 'Cookie name:', req.session?.cookie?.name, 'User:', req.user?.email || 'none');
+    
     // If user is authenticated but is admin, don't return them
     // This prevents admin users from being logged in on the frontend
     if (req.user && req.user.role === 'admin') {
@@ -226,7 +243,8 @@ const authController = {
     
     return res.json({
       authenticated: !!req.user,
-      user: req.user || null
+      user: req.user || null,
+      sessionId: req.sessionID
     });
   },
 

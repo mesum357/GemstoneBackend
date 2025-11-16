@@ -29,27 +29,33 @@ const isAdminRequest = (req) => {
   const adminUrl = process.env.ADMIN_URL || 'http://localhost:8081';
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
   
-  // If origin is explicitly set to admin URL, it's an admin request
-  if (origin && (
-    origin.includes('localhost:8081') ||
-    origin.includes(adminUrl.replace('http://', '').replace('https://', ''))
-  )) {
-    // Make sure it's not the frontend URL
-    if (!origin.includes('localhost:8080') && 
-        !origin.includes(frontendUrl.replace('http://', '').replace('https://', ''))) {
-      return true;
+  // Extract domain from URLs (remove protocol)
+  const adminDomain = adminUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const frontendDomain = frontendUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  
+  // If origin matches admin URL exactly, it's an admin request
+  if (origin) {
+    const originDomain = origin.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    if (originDomain === adminDomain || originDomain.includes(adminDomain)) {
+      // Make sure it's not the frontend URL
+      if (originDomain !== frontendDomain && !originDomain.includes(frontendDomain)) {
+        return true;
+      }
     }
   }
   
   // Check referer header as fallback
   const referer = req.get('referer') || '';
-  if (referer && (
-    referer.includes('localhost:8081') ||
-    referer.includes(adminUrl.replace('http://', '').replace('https://', ''))
-  )) {
-    if (!referer.includes('localhost:8080') && 
-        !referer.includes(frontendUrl.replace('http://', '').replace('https://', ''))) {
-      return true;
+  if (referer) {
+    const refererDomain = referer.replace(/^https?:\/\//, '').split('/')[0];
+    const adminDomain = adminUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const frontendDomain = frontendUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    
+    if (refererDomain === adminDomain || refererDomain.includes(adminDomain)) {
+      // Make sure it's not the frontend URL
+      if (refererDomain !== frontendDomain && !refererDomain.includes(frontendDomain)) {
+        return true;
+      }
     }
   }
   
@@ -75,7 +81,9 @@ export const createSessionMiddleware = () => {
       secure: process.env.NODE_ENV === 'production', // HTTPS only in production
       httpOnly: true,
       maxAge: 1000 * 60 * 60 * 24 * 14, // 14 days
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' // Allow cross-site in production
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Allow cross-site in production
+      // Don't set domain - let browser handle it for cross-domain cookies
+      // domain: undefined
     }
   });
 
@@ -93,13 +101,22 @@ export const createSessionMiddleware = () => {
       secure: process.env.NODE_ENV === 'production', // HTTPS only in production
       httpOnly: true,
       maxAge: 1000 * 60 * 60 * 24 * 14, // 14 days
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' // Allow cross-site in production
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Allow cross-site in production
+      // Don't set domain - let browser handle it for cross-domain cookies
+      // domain: undefined
     }
   });
 
   // Return middleware that chooses the right session based on request
   return (req, res, next) => {
-    if (isAdminRequest(req)) {
+    const isAdmin = isAdminRequest(req);
+    
+    // Debug logging for production
+    if (process.env.NODE_ENV === 'production') {
+      console.log('[Session Middleware] Path:', req.path, 'Origin:', req.get('origin'), 'IsAdmin:', isAdmin, 'Cookie:', req.headers.cookie?.substring(0, 50));
+    }
+    
+    if (isAdmin) {
       return adminSession(req, res, next);
     } else {
       return defaultSession(req, res, next);

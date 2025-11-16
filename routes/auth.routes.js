@@ -76,9 +76,17 @@ router.post(
       }
       req.login(user, (err) => {
         if (err) {
+          console.error('[Login Route] req.login error:', err);
           return next(err);
         }
-        return authController.login(req, res);
+        // Save session explicitly before calling login controller
+        req.session.save((saveErr) => {
+          if (saveErr) {
+            console.error('[Login Route] Session save error:', saveErr);
+            return next(saveErr);
+          }
+          return authController.login(req, res);
+        });
       });
     })(req, res, next);
   }
