@@ -72,10 +72,10 @@ export const createSessionMiddleware = () => {
       ttl: 14 * 24 * 60 * 60 // 14 days
     }),
     cookie: {
-      secure: process.env.NODE_ENV === 'production',
+      secure: process.env.NODE_ENV === 'production', // HTTPS only in production
       httpOnly: true,
       maxAge: 1000 * 60 * 60 * 24 * 14, // 14 days
-      sameSite: 'lax'
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' // Allow cross-site in production
     }
   });
 
@@ -90,10 +90,10 @@ export const createSessionMiddleware = () => {
       ttl: 14 * 24 * 60 * 60 // 14 days
     }),
     cookie: {
-      secure: process.env.NODE_ENV === 'production',
+      secure: process.env.NODE_ENV === 'production', // HTTPS only in production
       httpOnly: true,
       maxAge: 1000 * 60 * 60 * 24 * 14, // 14 days
-      sameSite: 'lax'
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' // Allow cross-site in production
     }
   });
 
