@@ -133,5 +133,63 @@ router.get('/admin/status', authController.getAdminAuthStatus);
 // Get all users (admin only, excludes admin users - only regular users)
 router.get('/users', isAuthenticated, isAdmin, authController.getAllUsers);
 
+// Check session route (for debugging session issues)
+router.get('/checksession', (req, res) => {
+  const sessionInfo = {
+    sessionId: req.sessionID,
+    sessionExists: !!req.session,
+    isAuthenticated: req.isAuthenticated(),
+    user: req.user ? {
+      _id: req.user._id,
+      email: req.user.email,
+      role: req.user.role
+    } : null,
+    cookieName: req.session?.cookie?.name || 'not set',
+    cookieOptions: req.session?.cookie ? {
+      secure: req.session.cookie.secure,
+      httpOnly: req.session.cookie.httpOnly,
+      sameSite: req.session.cookie.sameSite,
+      maxAge: req.session.cookie.maxAge,
+      expires: req.session.cookie.expires,
+      domain: req.session.cookie.domain
+    } : null,
+    requestHeaders: {
+      origin: req.get('origin'),
+      referer: req.get('referer'),
+      'x-client-type': req.get('x-client-type'),
+      cookie: req.headers.cookie ? req.headers.cookie.substring(0, 200) : 'no cookies'
+    },
+    environment: {
+      nodeEnv: process.env.NODE_ENV,
+      isRender: !!process.env.RENDER,
+      port: process.env.PORT,
+      isProduction: process.env.NODE_ENV === 'production' || !!process.env.RENDER || !!process.env.PORT
+    },
+    sessionStore: {
+      // Check if session store is accessible
+      type: req.sessionStore?.constructor?.name || 'unknown'
+    },
+    timestamp: new Date().toISOString()
+  };
+
+  // Add additional debug info
+  if (req.session) {
+    sessionInfo.sessionData = {
+      cookie: req.session.cookie ? {
+        originalMaxAge: req.session.cookie.originalMaxAge,
+        httpOnly: req.session.cookie.httpOnly,
+        secure: req.session.cookie.secure,
+        sameSite: req.session.cookie.sameSite
+      } : null
+    };
+  }
+
+  return res.json({
+    success: true,
+    message: 'Session check completed',
+    session: sessionInfo
+  });
+});
+
 export default router;
 
