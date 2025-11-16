@@ -76,6 +76,7 @@ mongoose
 
 // Routes
 app.use('/api/auth', authRoutes);
+console.log('✅ Auth routes registered at /api/auth');
 app.use('/api/products', productRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/payments', paymentRoutes);

@@ -135,6 +135,8 @@ router.get('/users', isAuthenticated, isAdmin, authController.getAllUsers);
 
 // Check session route (for debugging session issues)
 router.get('/checksession', (req, res) => {
+  console.log('[CheckSession] Route hit - Path:', req.path, 'Method:', req.method);
+  
   const sessionInfo = {
     sessionId: req.sessionID,
     sessionExists: !!req.session,
