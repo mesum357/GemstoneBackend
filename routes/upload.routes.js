@@ -19,13 +19,18 @@ router.post(
         });
       }
 
-      // Return the file path/URL
+      // Construct absolute URL for the uploaded file
+      const protocol = req.protocol || 'http';
+      const host = req.get('host') || 'localhost:3000';
+      const baseUrl = `${protocol}://${host}`;
       const fileUrl = `${uploadsUrl}/${req.file.filename}`;
+      const absoluteUrl = `${baseUrl}${fileUrl}`;
 
       return res.json({
         success: true,
         message: 'Image uploaded successfully',
-        imageUrl: fileUrl,
+        imageUrl: fileUrl, // Keep relative URL for backward compatibility
+        absoluteUrl: absoluteUrl, // New absolute URL field
         filename: req.file.filename
       });
     } catch (error) {

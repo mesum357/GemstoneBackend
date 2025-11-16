@@ -30,7 +30,8 @@ const allowedOrigins = [
   process.env.ADMIN_URL || 'http://localhost:8081',
   'http://localhost:8080',
   'http://localhost:8081',
-  'https://gemstonefrontend.onrender.com'
+  'https://gemstonefrontend.onrender.com',
+  'https://vitalgeonaturals.com'
 ].filter(Boolean); // Remove undefined values
 
 app.use(cors({

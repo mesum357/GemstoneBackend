@@ -1,5 +1,28 @@
 import Product from '../models/Product.model.js';
 
+// Helper function to normalize image URLs - replace localhost with production backend URL
+const normalizeImageUrl = (imageUrl, req) => {
+  if (!imageUrl) return imageUrl;
+  
+  // If image URL contains localhost, replace with current backend URL
+  if (imageUrl.includes('localhost:3000') || imageUrl.includes('127.0.0.1:3000')) {
+    const protocol = req.protocol || 'http';
+    const host = req.get('host') || 'localhost:3000';
+    const baseUrl = `${protocol}://${host}`;
+    return imageUrl.replace(/https?:\/\/[^/]+/, baseUrl);
+  }
+  
+  return imageUrl;
+};
+
+// Helper function to transform product image URLs in response
+const transformProductImages = (product, req) => {
+  if (product.image) {
+    product.image = normalizeImageUrl(product.image, req);
+  }
+  return product;
+};
+
 const productController = {
   // Get all products
   getAllProducts: async (req, res) => {
@@ -24,10 +47,16 @@ const productController = {
 
       const products = await Product.find(filter).sort({ createdAt: -1 });
 
+      // Transform image URLs to use current backend URL
+      const transformedProducts = products.map(product => {
+        const productObj = product.toObject();
+        return transformProductImages(productObj, req);
+      });
+
       return res.json({
         success: true,
-        count: products.length,
-        products
+        count: transformedProducts.length,
+        products: transformedProducts
       });
     } catch (error) {
       console.error('Get products error:', error);
@@ -51,9 +80,13 @@ const productController = {
         });
       }
 
+      // Transform image URL to use current backend URL
+      const productObj = product.toObject();
+      const transformedProduct = transformProductImages(productObj, req);
+
       return res.json({
         success: true,
-        product
+        product: transformedProduct
       });
     } catch (error) {
       console.error('Get product error:', error);
@@ -179,10 +212,16 @@ const productController = {
     try {
       const products = await Product.find().sort({ createdAt: -1 });
 
+      // Transform image URLs to use current backend URL
+      const transformedProducts = products.map(product => {
+        const productObj = product.toObject();
+        return transformProductImages(productObj, req);
+      });
+
       return res.json({
         success: true,
-        count: products.length,
-        products
+        count: transformedProducts.length,
+        products: transformedProducts
       });
     } catch (error) {
       console.error('Get admin products error:', error);
