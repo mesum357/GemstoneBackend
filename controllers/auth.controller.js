@@ -75,7 +75,8 @@ const authController = {
       }
 
       // Debug logging
-      console.log('[Login] User authenticated:', user.email, 'Session ID:', req.sessionID, 'Cookie name:', req.session?.cookie?.name);
+      const cookieName = req.session?.cookie?.name || (req.session?.cookie ? 'connect.sid' : 'undefined');
+      console.log('[Login] User authenticated:', user.email, 'Session ID:', req.sessionID, 'Cookie name:', cookieName, 'IsProduction:', process.env.NODE_ENV === 'production' || !!process.env.RENDER);
 
       // Reject admin users from regular login endpoint
       if (user.role === 'admin') {
@@ -230,7 +231,9 @@ const authController = {
   // Get authentication status (for regular users only, excludes admin users)
   getAuthStatus: (req, res) => {
     // Debug logging
-    console.log('[Auth Status] Session ID:', req.sessionID, 'Cookie name:', req.session?.cookie?.name, 'User:', req.user?.email || 'none');
+    const cookieName = req.session?.cookie?.name || (req.session?.cookie ? 'connect.sid' : 'undefined');
+    const cookies = req.headers.cookie || 'no cookies';
+    console.log('[Auth Status] Session ID:', req.sessionID, 'Cookie name:', cookieName, 'User:', req.user?.email || 'none', 'Cookies:', cookies.substring(0, 100));
     
     // If user is authenticated but is admin, don't return them
     // This prevents admin users from being logged in on the frontend

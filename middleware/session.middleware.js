@@ -67,23 +67,27 @@ const isAdminRequest = (req) => {
  * Creates different session configs for admin vs frontend
  */
 export const createSessionMiddleware = () => {
+  // Determine if we're in production (check for Render or production-like environment)
+  const isProduction = process.env.NODE_ENV === 'production' || 
+                       process.env.RENDER || 
+                       process.env.PORT; // Render sets PORT
+  
   // Default session config (for frontend)
   const defaultSession = session({
     name: 'connect.sid', // Default cookie name for frontend
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
-    saveUninitialized: false,
+    saveUninitialized: true, // Changed to true to ensure session is created and cookie is set
     store: MongoStore.create({
       mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/vitalgeonaturals',
       ttl: 14 * 24 * 60 * 60 // 14 days
     }),
     cookie: {
-      secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+      secure: isProduction, // HTTPS only in production
       httpOnly: true,
       maxAge: 1000 * 60 * 60 * 24 * 14, // 14 days
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Allow cross-site in production
+      sameSite: isProduction ? 'none' : 'lax', // Allow cross-site in production
       // Don't set domain - let browser handle it for cross-domain cookies
-      // domain: undefined
     }
   });
 
@@ -92,29 +96,27 @@ export const createSessionMiddleware = () => {
     name: 'admin.connect.sid', // Different cookie name for admin
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
-    saveUninitialized: false,
+    saveUninitialized: true, // Changed to true to ensure session is created and cookie is set
     store: MongoStore.create({
       mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/vitalgeonaturals',
       ttl: 14 * 24 * 60 * 60 // 14 days
     }),
     cookie: {
-      secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+      secure: isProduction, // HTTPS only in production
       httpOnly: true,
       maxAge: 1000 * 60 * 60 * 24 * 14, // 14 days
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Allow cross-site in production
+      sameSite: isProduction ? 'none' : 'lax', // Allow cross-site in production
       // Don't set domain - let browser handle it for cross-domain cookies
-      // domain: undefined
     }
   });
 
   // Return middleware that chooses the right session based on request
   return (req, res, next) => {
     const isAdmin = isAdminRequest(req);
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER || process.env.PORT;
     
-    // Debug logging for production
-    if (process.env.NODE_ENV === 'production') {
-      console.log('[Session Middleware] Path:', req.path, 'Origin:', req.get('origin'), 'IsAdmin:', isAdmin, 'Cookie:', req.headers.cookie?.substring(0, 50));
-    }
+    // Debug logging
+    console.log('[Session Middleware] Path:', req.path, 'Origin:', req.get('origin'), 'IsAdmin:', isAdmin, 'IsProduction:', isProduction, 'Cookie:', req.headers.cookie?.substring(0, 80) || 'none');
     
     if (isAdmin) {
       return adminSession(req, res, next);

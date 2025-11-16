@@ -62,12 +62,10 @@ const paymentSchema = new mongoose.Schema(
   }
 );
 
-// Index for faster queries
-paymentSchema.index({ bookingId: 1 });
+// Index for faster queries (bookingId and transactionId already have unique indexes from schema)
 paymentSchema.index({ productId: 1 });
 paymentSchema.index({ userId: 1 });
 paymentSchema.index({ status: 1 });
-paymentSchema.index({ transactionId: 1 }, { sparse: true }); // Sparse index for optional transactionId
 
 const Payment = mongoose.model('Payment', paymentSchema);
 
