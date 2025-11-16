@@ -87,23 +87,62 @@ const authController = {
         });
       }
 
-      // Ensure session is saved
+      // Ensure session is modified and saved (express-session only sets cookie if session is modified)
+      // Store user data in session to mark it as modified
+      req.session.userId = user._id.toString();
+      req.session.lastLogin = new Date();
+      
+      // Touch session to update expiration
+      if (req.session.touch) {
+        req.session.touch();
+      }
+
+      // Ensure cookie properties are correct
+      if (req.session.cookie) {
+        const isProduction = process.env.NODE_ENV === 'production' || 
+                             process.env.RENDER || 
+                             process.env.PORT;
+        req.session.cookie.secure = isProduction;
+        req.session.cookie.sameSite = isProduction ? 'none' : 'lax';
+        req.session.cookie.path = '/';
+        req.session.cookie.domain = undefined;
+        req.session.cookie.overwrite = true;
+      }
+
+      // Save session explicitly - this will set the cookie
       req.session.save((err) => {
         if (err) {
           console.error('[Login] Session save error:', err);
-        } else {
-          console.log('[Login] Session saved successfully');
+          return res.status(500).json({
+            success: false,
+            message: 'Error saving session',
+            error: err.message
+          });
         }
-      });
+        
+        // Check if cookie was set
+        const setCookieHeader = res.getHeader('Set-Cookie');
+        const cookieSet = setCookieHeader && (
+          Array.isArray(setCookieHeader)
+            ? setCookieHeader.some(c => c.startsWith(req.session.cookie?.name || 'connect.sid'))
+            : setCookieHeader.toString().startsWith(req.session.cookie?.name || 'connect.sid')
+        );
+        
+        if (!cookieSet) {
+          console.error('[Login] ⚠️ Cookie NOT set after session save!');
+        } else {
+          console.log('[Login] ✅ Cookie set successfully - Session ID:', req.sessionID);
+        }
 
-      // Remove password from response
-      const userResponse = user.toJSON();
+        // Remove password from response
+        const userResponse = user.toJSON();
 
-      return res.json({
-        success: true,
-        message: 'Login successful',
-        user: userResponse,
-        sessionId: req.sessionID
+        return res.json({
+          success: true,
+          message: 'Login successful',
+          user: userResponse,
+          sessionId: req.sessionID
+        });
       });
     } catch (error) {
       console.error('Login error:', error);

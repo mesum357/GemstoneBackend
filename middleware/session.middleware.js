@@ -72,27 +72,43 @@ export const createSessionMiddleware = () => {
                        process.env.RENDER || 
                        process.env.PORT; // Render sets PORT
   
+  // Get session configuration from environment
+  const SESSION_NAME = process.env.SESSION_NAME || 'connect.sid';
+  const SESSION_MAX_AGE = process.env.SESSION_MAX_AGE 
+    ? parseInt(process.env.SESSION_MAX_AGE) 
+    : 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds (default)
+  const SESSION_TTL = Math.floor(SESSION_MAX_AGE / 1000); // Convert to seconds for MongoDB TTL
+  
   // Default session config (for frontend)
   const defaultSession = session({
-    name: 'connect.sid', // Default cookie name for frontend
+    name: SESSION_NAME, // Cookie name configurable via SESSION_NAME
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
-    saveUninitialized: true, // Changed to true to ensure session is created and cookie is set
+    saveUninitialized: true, // Save session even if not modified to ensure cookie is set
     store: MongoStore.create({
       mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/vitalgeonaturals',
-      ttl: 14 * 24 * 60 * 60, // 14 days
-      touchAfter: 24 * 3600 // Lazy session update (1 day)
+      collectionName: 'sessions', // Explicit collection name
+      ttl: SESSION_TTL * 2, // 14 days (double cookie maxAge for MongoDB cleanup)
+      touchAfter: 24 * 3600, // Lazy session update (1 day)
+      stringify: false, // Store as BSON (faster)
+      autoRemove: 'native', // Use MongoDB TTL index
+      autoRemoveInterval: 3600, // Check for expired sessions every hour
+      autoIndex: false // Don't auto-create indexes (can cause warnings)
     }),
     cookie: {
+      httpOnly: true, // Prevent JavaScript access
       secure: isProduction, // HTTPS only in production
-      httpOnly: true,
-      maxAge: 1000 * 60 * 60 * 24 * 14, // 14 days
       sameSite: isProduction ? 'none' : 'lax', // Allow cross-site in production
-      // Don't set domain - let browser handle it for cross-domain cookies
-      path: '/' // Ensure cookie is set for all paths
+      maxAge: SESSION_MAX_AGE, // Cookie expiration (7 days default)
+      path: '/', // Available site-wide
+      domain: undefined, // No domain restriction for cross-domain support
+      overwrite: true // Overwrite existing cookies
     },
-    // Ensure session is saved even if not modified
-    rolling: true // Reset expiration on activity
+    rolling: true, // Reset expiration on activity
+    genid: () => {
+      // Generate cryptographically random session ID (32 hex characters)
+      return crypto.randomBytes(16).toString('hex');
+    }
   });
 
   // Admin session config (separate cookie)
@@ -100,22 +116,30 @@ export const createSessionMiddleware = () => {
     name: 'admin.connect.sid', // Different cookie name for admin
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
-    saveUninitialized: true, // Changed to true to ensure session is created and cookie is set
+    saveUninitialized: true, // Save session even if not modified
     store: MongoStore.create({
       mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/vitalgeonaturals',
-      ttl: 14 * 24 * 60 * 60, // 14 days
-      touchAfter: 24 * 3600 // Lazy session update (1 day)
+      collectionName: 'admin_sessions', // Separate collection for admin sessions
+      ttl: SESSION_TTL * 2, // 14 days
+      touchAfter: 24 * 3600, // Lazy session update (1 day)
+      stringify: false, // Store as BSON
+      autoRemove: 'native',
+      autoRemoveInterval: 3600,
+      autoIndex: false
     }),
     cookie: {
-      secure: isProduction, // HTTPS only in production
       httpOnly: true,
-      maxAge: 1000 * 60 * 60 * 24 * 14, // 14 days
-      sameSite: isProduction ? 'none' : 'lax', // Allow cross-site in production
-      // Don't set domain - let browser handle it for cross-domain cookies
-      path: '/' // Ensure cookie is set for all paths
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      maxAge: SESSION_MAX_AGE,
+      path: '/',
+      domain: undefined,
+      overwrite: true
     },
-    // Ensure session is saved even if not modified
-    rolling: true // Reset expiration on activity
+    rolling: true,
+    genid: () => {
+      return require('crypto').randomBytes(16).toString('hex');
+    }
   });
 
   // Return middleware that chooses the right session based on request
@@ -143,9 +167,31 @@ export const createSessionMiddleware = () => {
         console.warn('[Session Middleware] Session exists but no sessionID!');
       }
       
-      // Log if cookie will be set
+      // Log if cookie will be set and ensure cookie properties are correct
       if (req.session && req.session.cookie) {
-        console.log('[Session Middleware] Session created - ID:', req.sessionID, 'Cookie name:', req._sessionCookieName);
+        console.log('[Session Middleware] Session initialized - ID:', req.sessionID, 'Cookie name:', req._sessionCookieName);
+        
+        // Ensure cookie properties are set correctly for cross-domain support
+        if (req.session.cookie) {
+          req.session.cookie.secure = isProduction;
+          req.session.cookie.sameSite = isProduction ? 'none' : 'lax';
+          req.session.cookie.path = '/';
+          req.session.cookie.domain = undefined; // Don't set domain for cross-domain support
+          req.session.cookie.overwrite = true;
+        }
+        
+        // IMPORTANT: Mark session as modified to ensure cookie is set
+        // Even with saveUninitialized: true, we need to ensure the session is tracked
+        if (typeof req.session.save === 'function') {
+          // Touch session to update expiration
+          if (req.session.touch) {
+            req.session.touch();
+          }
+          // Mark as modified by adding a property
+          req.session._lastAccess = new Date().getTime();
+        }
+      } else if (!req.session) {
+        console.warn('[Session Middleware] No session created for request');
       }
       
       next();

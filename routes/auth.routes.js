@@ -79,12 +79,26 @@ router.post(
           console.error('[Login Route] req.login error:', err);
           return next(err);
         }
+        
+        // Ensure session properties are set correctly
+        if (req.session && req.session.cookie) {
+          const isProduction = process.env.NODE_ENV === 'production' || 
+                               process.env.RENDER || 
+                               process.env.PORT;
+          req.session.cookie.secure = isProduction;
+          req.session.cookie.sameSite = isProduction ? 'none' : 'lax';
+          req.session.cookie.path = '/';
+          req.session.cookie.domain = undefined;
+          req.session.cookie.overwrite = true;
+        }
+        
         // Save session explicitly before calling login controller
         req.session.save((saveErr) => {
           if (saveErr) {
             console.error('[Login Route] Session save error:', saveErr);
             return next(saveErr);
           }
+          console.log('[Login Route] Session saved successfully - ID:', req.sessionID);
           return authController.login(req, res);
         });
       });
@@ -192,25 +206,41 @@ router.get('/checksession', (req, res) => {
     };
   }
 
-  // Ensure session is saved and cookie is set before sending response
-  req.session.save((err) => {
-    if (err) {
-      console.error('[CheckSession] Error saving session:', err);
-      return res.status(500).json({
-        success: false,
-        message: 'Error saving session',
-        error: err.message
-      });
+  // Mark session as modified to ensure cookie is set (even if unmodified)
+  if (req.session) {
+    // Touch the session to mark it as modified
+    if (req.session.touch) {
+      req.session.touch();
     }
-    
-    // Log Set-Cookie header being sent
+    // Ensure cookie properties are correct
+    if (req.session.cookie) {
+      const isProduction = process.env.NODE_ENV === 'production' || 
+                           process.env.RENDER || 
+                           process.env.PORT;
+      req.session.cookie.secure = isProduction;
+      req.session.cookie.sameSite = isProduction ? 'none' : 'lax';
+      req.session.cookie.path = '/';
+      req.session.cookie.domain = undefined;
+      req.session.cookie.overwrite = true;
+    }
+    // Modify session to ensure it's saved and cookie is set
+    req.session.lastAccess = new Date();
+  }
+
+  // Hook into response to check cookie after express-session sets it
+  const originalJson = res.json.bind(res);
+  const originalEnd = res.end.bind(res);
+  
+  // Override res.end to check for cookie header after express-session sets it
+  res.end = function(chunk, encoding) {
+    // Check cookie header right before response is sent
     const setCookieHeader = res.getHeader('Set-Cookie');
     if (setCookieHeader) {
       const cookieValue = Array.isArray(setCookieHeader) ? setCookieHeader[0] : setCookieHeader;
-      console.log('[CheckSession] Set-Cookie header:', cookieValue?.substring(0, 150));
+      console.log('[CheckSession] ✅ Set-Cookie header found:', cookieValue?.substring(0, 150));
       sessionInfo.setCookieHeader = cookieValue;
     } else {
-      console.warn('[CheckSession] ⚠️ No Set-Cookie header found! Cookie may not be set.');
+      console.error('[CheckSession] ⚠️ No Set-Cookie header found! Session ID:', req.sessionID);
       sessionInfo.setCookieHeader = 'Not Set - This is the problem!';
     }
     
@@ -222,6 +252,22 @@ router.get('/checksession', (req, res) => {
     };
     sessionInfo.responseHeaders = responseHeaders;
     
+    // Call original end
+    originalEnd.call(this, chunk, encoding);
+  };
+
+  // Ensure session is saved and cookie is set before sending response
+  req.session.save((err) => {
+    if (err) {
+      console.error('[CheckSession] Error saving session:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Error saving session',
+        error: err.message
+      });
+    }
+    
+    // Send response - cookie checking happens in res.end override
     return res.json({
       success: true,
       message: 'Session check completed',

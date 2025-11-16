@@ -11,6 +11,8 @@ import paymentSettingsRoutes from './routes/paymentSettings.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
 import { uploadsPath, uploadsUrl } from './middleware/upload.middleware.js';
 import { createSessionMiddleware } from './middleware/session.middleware.js';
+import { sessionRecoveryMiddleware } from './middleware/sessionRecovery.middleware.js';
+import { sessionCookieMiddleware } from './middleware/sessionCookie.middleware.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import './config/passport.config.js';
@@ -58,6 +60,12 @@ app.use('/uploads/payment-settings', express.static(path.join(__dirname, 'upload
 
 // Session configuration with separate cookies for frontend and admin
 app.use(createSessionMiddleware());
+
+// Session recovery middleware (recovers sessions if cookie exists but session is empty)
+app.use(sessionRecoveryMiddleware);
+
+// Session cookie middleware (ensures cookie is set on every request if session exists)
+app.use(sessionCookieMiddleware);
 
 // Passport middleware
 app.use(passport.initialize());
