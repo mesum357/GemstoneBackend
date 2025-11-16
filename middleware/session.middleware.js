@@ -1,5 +1,6 @@
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
+import crypto from 'crypto';
 
 /**
  * Middleware to determine if request is from admin panel
@@ -138,7 +139,7 @@ export const createSessionMiddleware = () => {
     },
     rolling: true,
     genid: () => {
-      return require('crypto').randomBytes(16).toString('hex');
+      return crypto.randomBytes(16).toString('hex');
     }
   });
 
