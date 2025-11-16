@@ -24,14 +24,26 @@ dotenv.config();
 const app = express();
 
 // Middleware
+// CORS configuration - allows requests from frontend, admin, and localhost
+const allowedOrigins = [
+  process.env.FRONTEND_URL || 'http://localhost:8080',
+  process.env.ADMIN_URL || 'http://localhost:8081',
+  'http://localhost:8080',
+  'http://localhost:8081',
+  'https://gemstonefrontend.onrender.com'
+].filter(Boolean); // Remove undefined values
+
 app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL || 'http://localhost:8080',
-    process.env.ADMIN_URL || 'http://localhost:8081',
-    'http://localhost:8080',
-    'http://localhost:8081',
-    'https://gemstonefrontend.onrender.com'
-  ],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 
