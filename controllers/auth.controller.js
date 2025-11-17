@@ -1,4 +1,6 @@
 import User from '../models/User.model.js';
+import crypto from 'crypto';
+import { sign } from 'cookie-signature';
 
 const authController = {
   // Signup controller (for regular users only)
@@ -35,19 +37,50 @@ const authController = {
 
       await newUser.save();
 
-      // Log in the user after signup
+      // Log session state BEFORE req.login
+      console.log('[Signup] before req.login session:', JSON.stringify({
+        sessionID: req.sessionID,
+        passport: req.session?.passport || 'missing',
+        userId: req.session?.userId || 'missing'
+      }));
+
+      // Log in the user after signup - use callback-based req.login to ensure serializeUser runs
       req.login(newUser, (err) => {
         if (err) {
+          console.error('[Signup] req.login error:', err);
           return next(err);
         }
 
-        // Remove password from response
-        const userResponse = newUser.toJSON();
+        // Debug log to confirm passport was added to session
+        console.log('[Signup] after req.login req.session:', JSON.stringify({
+          sessionID: req.sessionID,
+          passport: req.session.passport || 'missing',
+          userId: req.session.userId || 'missing'
+        }));
 
-        return res.status(201).json({
-          success: true,
-          message: 'User created successfully',
-          user: userResponse
+        // Force a save to the store so that the DB contains passport.user before response
+        req.session.save((saveErr) => {
+          if (saveErr) {
+            console.error('[Signup] session.save error', saveErr);
+            return next(saveErr);
+          }
+
+          console.log('[Signup] session saved - session id:', req.sessionID);
+          console.log('[Signup] session.save callback session:', JSON.stringify({
+            sessionID: req.sessionID,
+            passport: req.session.passport || 'missing',
+            userId: req.session.userId || 'missing'
+          }));
+
+          // Remove password from response
+          const userResponse = newUser.toJSON();
+
+          // Now respond
+          return res.status(201).json({
+            success: true,
+            message: 'User created successfully',
+            user: userResponse
+          });
         });
       });
     } catch (error) {
@@ -87,16 +120,10 @@ const authController = {
         });
       }
 
-      // Ensure session is modified and saved (express-session only sets cookie if session is modified)
-      // Store user data in session to mark it as modified
-      req.session.userId = user._id.toString();
-      req.session.lastLogin = new Date();
+      // IMPORTANT: Session is already saved to MongoDB by req.login() callback in route
+      // We just need to ensure express-session sets a cookie and send the response
+      // The session already has passport.user, userId, userEmail, and loginTime
       
-      // Touch session to update expiration
-      if (req.session.touch) {
-        req.session.touch();
-      }
-
       // Ensure cookie properties are correct
       if (req.session.cookie) {
         const isProduction = process.env.NODE_ENV === 'production' || 
@@ -108,41 +135,66 @@ const authController = {
         req.session.cookie.domain = undefined;
         req.session.cookie.overwrite = true;
       }
-
-      // Save session explicitly - this will set the cookie
-      req.session.save((err) => {
-        if (err) {
-          console.error('[Login] Session save error:', err);
-          return res.status(500).json({
-            success: false,
-            message: 'Error saving session',
-            error: err.message
-          });
-        }
-        
-        // Check if cookie was set
+      
+      // IMPORTANT: Mark session as modified so express-session will set cookie during res.end()
+      req.session.lastAccess = Date.now();
+      
+      // Touch session to update expiration (rolling sessions)
+      if (req.session.touch) {
+        req.session.touch();
+      }
+      
+      // Hook into res.end to ensure cookie is set
+      const originalEnd = res.end.bind(res);
+      res.end = function(chunk, encoding) {
+        // Check if cookie was set by express-session
         const setCookieHeader = res.getHeader('Set-Cookie');
         const cookieSet = setCookieHeader && (
           Array.isArray(setCookieHeader)
-            ? setCookieHeader.some(c => c.startsWith(req.session.cookie?.name || 'connect.sid'))
-            : setCookieHeader.toString().startsWith(req.session.cookie?.name || 'connect.sid')
+            ? setCookieHeader.some(c => c && c.startsWith(req.session?.cookie?.name || 'connect.sid'))
+            : setCookieHeader && setCookieHeader.toString().startsWith(req.session?.cookie?.name || 'connect.sid')
         );
         
-        if (!cookieSet) {
-          console.error('[Login] ⚠️ Cookie NOT set after session save!');
-        } else {
-          console.log('[Login] ✅ Cookie set successfully - Session ID:', req.sessionID);
+        if (!cookieSet && req.session && req.sessionID) {
+          // express-session didn't set cookie - manually set it
+          console.warn('[Login] express-session did not set cookie - manually setting it');
+          const isProduction = process.env.NODE_ENV === 'production' || 
+                               process.env.RENDER || 
+                               process.env.PORT;
+          const cookieName = req.session.cookie?.name || 'connect.sid';
+          const secret = process.env.SESSION_SECRET || 'your-secret-key';
+          
+          // Use express-session's cookie signing format: s:sessionId.signature
+          const signature = sign(req.sessionID, secret);
+          const signedSessionId = `s:${signature}`;
+          
+          res.cookie(cookieName, signedSessionId, {
+            httpOnly: true,
+            secure: isProduction,
+            sameSite: isProduction ? 'none' : 'lax',
+            maxAge: req.session.cookie?.maxAge || 7 * 24 * 60 * 60 * 1000,
+            path: '/',
+            domain: undefined,
+            overwrite: true
+          });
+          
+          console.log('[Login] ✅ Manually set cookie - Session ID:', req.sessionID);
+        } else if (cookieSet) {
+          console.log('[Login] ✅ Cookie set by express-session - Session ID:', req.sessionID);
         }
+        
+        originalEnd.call(this, chunk, encoding);
+      };
+      
+      // Remove password from response
+      const userResponse = user.toJSON();
 
-        // Remove password from response
-        const userResponse = user.toJSON();
-
-        return res.json({
-          success: true,
-          message: 'Login successful',
-          user: userResponse,
-          sessionId: req.sessionID
-        });
+      // Send response - cookie will be checked/set in res.end hook
+      return res.json({
+        success: true,
+        message: 'Login successful',
+        user: userResponse,
+        sessionId: req.sessionID
       });
     } catch (error) {
       console.error('Login error:', error);
@@ -273,13 +325,20 @@ const authController = {
     const cookieName = req.session?.cookie?.name || (req.session?.cookie ? 'connect.sid' : 'undefined');
     const cookies = req.headers.cookie || 'no cookies';
     console.log('[Auth Status] Session ID:', req.sessionID, 'Cookie name:', cookieName, 'User:', req.user?.email || 'none', 'Cookies:', cookies.substring(0, 100));
+    console.log('[Auth Status] Session exists:', !!req.session, 'Session ID from req:', req.sessionID);
+    console.log('[Auth Status] Session data:', req.session ? {
+      userId: req.session.userId,
+      userEmail: req.session.userEmail,
+      passport: req.session.passport ? 'exists' : 'missing'
+    } : 'no session');
     
     // If user is authenticated but is admin, don't return them
     // This prevents admin users from being logged in on the frontend
     if (req.user && req.user.role === 'admin') {
       return res.json({
         authenticated: false,
-        user: null
+        user: null,
+        sessionId: req.sessionID
       });
     }
     

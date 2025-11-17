@@ -74,13 +74,31 @@ router.post(
           message: info?.message || 'Invalid email or password'
         });
       }
+
+      // Log session state BEFORE req.login
+      console.log('[Login Route] before req.login session:', JSON.stringify({
+        sessionID: req.sessionID,
+        passport: req.session?.passport || 'missing',
+        userId: req.session?.userId || 'missing',
+        cookie: req.session?.cookie ? 'exists' : 'missing'
+      }));
+
+      // Use callback-based req.login to ensure serializeUser runs
       req.login(user, (err) => {
         if (err) {
           console.error('[Login Route] req.login error:', err);
           return next(err);
         }
-        
-        // Ensure session properties are set correctly
+
+        // Debug log to confirm passport was added to session
+        console.log('[Login Route] after req.login req.session:', JSON.stringify({
+          sessionID: req.sessionID,
+          passport: req.session.passport || 'missing',
+          userId: req.session.userId || 'missing',
+          userEmail: req.session.userEmail || 'missing'
+        }));
+
+        // Ensure cookie properties are correct
         if (req.session && req.session.cookie) {
           const isProduction = process.env.NODE_ENV === 'production' || 
                                process.env.RENDER || 
@@ -92,13 +110,27 @@ router.post(
           req.session.cookie.overwrite = true;
         }
         
-        // Save session explicitly before calling login controller
+        // Store user data in session (req.login already serialized to req.session.passport.user)
+        req.session.userId = user._id.toString();
+        req.session.userEmail = user.email;
+        req.session.loginTime = Date.now();
+        
+        // Force a save to the store so that the DB contains passport.user before response
         req.session.save((saveErr) => {
           if (saveErr) {
-            console.error('[Login Route] Session save error:', saveErr);
+            console.error('[Login Route] session.save error', saveErr);
             return next(saveErr);
           }
-          console.log('[Login Route] Session saved successfully - ID:', req.sessionID);
+
+          console.log('[Login Route] session saved - session id:', req.sessionID);
+          console.log('[Login Route] session.save callback session:', JSON.stringify({
+            sessionID: req.sessionID,
+            passport: req.session.passport || 'missing',
+            userId: req.session.userId || 'missing',
+            userEmail: req.session.userEmail || 'missing'
+          }));
+
+          // Now respond - call login controller which will handle response and cookie setting
           return authController.login(req, res);
         });
       });
@@ -122,11 +154,45 @@ router.post(
           message: info?.message || 'Invalid email or password'
         });
       }
+
+      // Log session state BEFORE req.login
+      console.log('[Admin Login Route] before req.login session:', JSON.stringify({
+        sessionID: req.sessionID,
+        passport: req.session?.passport || 'missing',
+        userId: req.session?.userId || 'missing'
+      }));
+
+      // Use callback-based req.login to ensure serializeUser runs
       req.login(user, (err) => {
         if (err) {
+          console.error('[Admin Login Route] req.login error:', err);
           return next(err);
         }
-        return authController.adminLogin(req, res);
+
+        // Debug log to confirm passport was added to session
+        console.log('[Admin Login Route] after req.login req.session:', JSON.stringify({
+          sessionID: req.sessionID,
+          passport: req.session.passport || 'missing',
+          userId: req.session.userId || 'missing'
+        }));
+
+        // Force a save to the store so that the DB contains passport.user before response
+        req.session.save((saveErr) => {
+          if (saveErr) {
+            console.error('[Admin Login Route] session.save error', saveErr);
+            return next(saveErr);
+          }
+
+          console.log('[Admin Login Route] session saved - session id:', req.sessionID);
+          console.log('[Admin Login Route] session.save callback session:', JSON.stringify({
+            sessionID: req.sessionID,
+            passport: req.session.passport || 'missing',
+            userId: req.session.userId || 'missing'
+          }));
+
+          // Now respond
+          return authController.adminLogin(req, res);
+        });
       });
     })(req, res, next);
   }

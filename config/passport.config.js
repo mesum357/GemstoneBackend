@@ -41,6 +41,8 @@ passport.use(
 
 // Serialize user for session
 passport.serializeUser((user, done) => {
+  console.log('[passport] serializeUser user:', user && user.id ? user.id : (user && user._id ? user._id : 'no id'));
+  // MUST be a simple stable id (string/number)
   done(null, user._id);
 });
 

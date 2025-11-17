@@ -1,6 +1,7 @@
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
 import crypto from 'crypto';
+import { createSanitizedMongoStore } from './sanitizedMongoStore.js';
 
 /**
  * Middleware to determine if request is from admin panel
@@ -86,11 +87,11 @@ export const createSessionMiddleware = () => {
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
     saveUninitialized: true, // Save session even if not modified to ensure cookie is set
-    store: MongoStore.create({
+    store: createSanitizedMongoStore({
       mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/vitalgeonaturals',
       collectionName: 'sessions', // Explicit collection name
       ttl: SESSION_TTL * 2, // 14 days (double cookie maxAge for MongoDB cleanup)
-      touchAfter: 24 * 3600, // Lazy session update (1 day)
+      touchAfter: 0, // Disabled for debugging - every change is persisted immediately
       stringify: false, // Store as BSON (faster)
       autoRemove: 'native', // Use MongoDB TTL index
       autoRemoveInterval: 3600, // Check for expired sessions every hour
@@ -118,11 +119,11 @@ export const createSessionMiddleware = () => {
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
     saveUninitialized: true, // Save session even if not modified
-    store: MongoStore.create({
+    store: createSanitizedMongoStore({
       mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/vitalgeonaturals',
       collectionName: 'admin_sessions', // Separate collection for admin sessions
       ttl: SESSION_TTL * 2, // 14 days
-      touchAfter: 24 * 3600, // Lazy session update (1 day)
+      touchAfter: 0, // Disabled for debugging - every change is persisted immediately
       stringify: false, // Store as BSON
       autoRemove: 'native',
       autoRemoveInterval: 3600,
@@ -160,12 +161,84 @@ export const createSessionMiddleware = () => {
     return sessionMiddleware(req, res, (err) => {
       if (err) {
         console.error('[Session Middleware] Error:', err);
+        
+        // Handle specific error: missing cookie object in session loaded from MongoDB
+        if (err.message && err.message.includes('Cannot read properties of undefined (reading \'expires\')')) {
+          console.warn('[Session Middleware] Corrupted session in MongoDB (missing cookie object) - deleting corrupted session');
+          
+          // Get the session ID that was corrupted
+          const corruptedSessionId = req.sessionID;
+          
+          // Delete the corrupted session from MongoDB if we have a session store
+          if (corruptedSessionId && req.sessionStore && typeof req.sessionStore.destroy === 'function') {
+            req.sessionStore.destroy(corruptedSessionId, (destroyErr) => {
+              if (destroyErr) {
+                console.error('[Session Middleware] Error deleting corrupted session:', destroyErr);
+              } else {
+                console.log('[Session Middleware] Deleted corrupted session from MongoDB:', corruptedSessionId.substring(0, 10) + '...');
+              }
+            });
+          }
+          
+          // Clear the corrupted cookie from the request to force a new session
+          const cookieName = req._sessionCookieName || 'connect.sid';
+          const cookies = req.headers.cookie || '';
+          
+          // Remove the corrupted cookie from the cookie header
+          if (cookies.includes(cookieName)) {
+            const cookieRegex = new RegExp(`${cookieName}=[^;]+(;\\s*)?`, 'gi');
+            req.headers.cookie = cookies.replace(cookieRegex, '').trim().replace(/^;|;$/g, '').trim();
+            
+            // Also clear it from the response
+            res.clearCookie(cookieName, {
+              path: '/',
+              domain: undefined,
+              secure: process.env.NODE_ENV === 'production' || process.env.RENDER || process.env.PORT,
+              sameSite: (process.env.NODE_ENV === 'production' || process.env.RENDER || process.env.PORT) ? 'none' : 'lax',
+              httpOnly: true
+            });
+            
+            console.log('[Session Middleware] Cleared corrupted cookie from request');
+          }
+          
+          // Clear session-related properties to let express-session create a new session
+          delete req.sessionID;
+          delete req.session;
+          
+          // Don't pass error to next() - this allows express-session to handle it
+          // express-session will see no session cookie and create a new session
+          // Note: This means the request will continue without a session initially,
+          // but on the next request (after the cookie is cleared), a new session will be created
+          console.log('[Session Middleware] Will create new session on next request');
+          return next();
+        }
+        
+        // For other errors, continue normally (might be handled by express-session)
         return next(err);
       }
       
       // After session middleware, ensure cookie is being set
       if (req.session && !req.sessionID) {
         console.warn('[Session Middleware] Session exists but no sessionID!');
+      }
+      
+      // Ensure session has a cookie object (fix if missing)
+      if (req.session && !req.session.cookie) {
+        console.warn('[Session Middleware] Session missing cookie object - initializing');
+        const SESSION_MAX_AGE = process.env.SESSION_MAX_AGE 
+          ? parseInt(process.env.SESSION_MAX_AGE) 
+          : 7 * 24 * 60 * 60 * 1000;
+        
+        req.session.cookie = {
+          path: '/',
+          maxAge: SESSION_MAX_AGE,
+          expires: new Date(Date.now() + SESSION_MAX_AGE),
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: isProduction ? 'none' : 'lax',
+          domain: undefined,
+          overwrite: true
+        };
       }
       
       // Log if cookie will be set and ensure cookie properties are correct
@@ -179,6 +252,14 @@ export const createSessionMiddleware = () => {
           req.session.cookie.path = '/';
           req.session.cookie.domain = undefined; // Don't set domain for cross-domain support
           req.session.cookie.overwrite = true;
+          
+          // Ensure expires is set if missing
+          if (!req.session.cookie.expires) {
+            const SESSION_MAX_AGE = process.env.SESSION_MAX_AGE 
+              ? parseInt(process.env.SESSION_MAX_AGE) 
+              : 7 * 24 * 60 * 60 * 1000;
+            req.session.cookie.expires = new Date(Date.now() + SESSION_MAX_AGE);
+          }
         }
         
         // IMPORTANT: Mark session as modified to ensure cookie is set
